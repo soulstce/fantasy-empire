@@ -1,6 +1,6 @@
 import type { BuildingType, MonsterType, Spell } from './types';
 
-export const BUILDINGS: Record<BuildingType, { name: string; cost: { wood: number; stone: number; food?: number }; hp: number; description: string }> = {
+export const BUILDINGS: Record<BuildingType, { name: string; cost: { wood: number; stone?: number; food?: number }; hp: number; description: string }> = {
   'main-hall': { name: 'Main Hall', cost: { wood: 120, stone: 60 }, hp: 600, description: 'Command center, unlocks the colony.' },
   house: { name: 'House', cost: { wood: 35 }, hp: 220, description: 'Provides 2 villagers.' },
   'potion-shop': { name: 'Potion Shop', cost: { wood: 50, stone: 20 }, hp: 180, description: 'Crafts healing supplies and spell reagents.' },
