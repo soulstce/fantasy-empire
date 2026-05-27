@@ -80,6 +80,7 @@ export class FantasyEmpireEngine {
   private ctx: CanvasRenderingContext2D;
   private onUpdate: (state: GameState) => void;
   private hovered: GridPoint | null = null;
+  private defenseBoost = 0;
   private loopFrame = (timestamp: number) => {
     const dt = Math.min(0.033, (timestamp - this.last) / 1000 || 0.016);
     this.last = timestamp;
@@ -121,14 +122,15 @@ export class FantasyEmpireEngine {
     this.state.messages.unshift(`Villagers assigned to ${task}.`);
   }
 
-  queueAction(type: QueueAction['type']) {
+  queueAction(type: QueueAction['type'], spellId?: string) {
     const action: QueueAction = {
       id: uid('action'),
       type,
       name: type === 'attack' ? 'Attack' : type === 'defend' ? 'Defend' : 'Spell Queue',
       power: type === 'attack' ? this.state.player.attack + this.state.player.level : type === 'defend' ? this.state.player.defense + 2 : 8,
       duration: 1.1,
-      remaining: 1.1
+      remaining: 1.1,
+      spellId
     };
     this.state.queuedActions.push(action);
     this.state.messages.unshift(`Queued ${action.name.toLowerCase()}.`);
@@ -142,8 +144,18 @@ export class FantasyEmpireEngine {
       return;
     }
     this.state.player.mp -= spell.costMp;
-    this.queueAction('spell');
+    this.queueAction('spell', spellId);
     this.state.messages.unshift(`Cast ${spell.name}.`);
+  }
+
+  consumePotion() {
+    if (this.state.inventory.potions <= 0) {
+      this.state.messages.unshift('No potions left.');
+      return;
+    }
+    this.state.inventory.potions -= 1;
+    this.state.player.hp = clamp(this.state.player.hp + 12, 0, this.state.player.maxHp);
+    this.state.messages.unshift('Potion consumed.');
   }
 
   buildSelected(at: GridPoint) {
@@ -203,9 +215,16 @@ export class FantasyEmpireEngine {
   }
 
   private tickQueue(dt: number) {
-    this.state.queuedActions = this.state.queuedActions
-      .map((action) => ({ ...action, remaining: action.remaining - dt }))
-      .filter((action) => action.remaining > 0);
+    const nextQueue: QueueAction[] = [];
+    for (const action of this.state.queuedActions) {
+      const remaining = action.remaining - dt;
+      if (remaining > 0) {
+        nextQueue.push({ ...action, remaining });
+        continue;
+      }
+      this.resolveAction(action);
+    }
+    this.state.queuedActions = nextQueue;
   }
 
   private tickVillagers(dt: number) {
@@ -244,10 +263,17 @@ export class FantasyEmpireEngine {
         const len = Math.hypot(dx, dy) || 1;
         enemy.x += (dx / len) * enemy.speed * 35 * dt;
         enemy.y += (dy / len) * enemy.speed * 35 * dt;
-        if (dist < 22) this.state.player.hp = Math.max(0, this.state.player.hp - enemy.attack * dt * 0.8);
+        if (dist < 22) this.state.player.hp = Math.max(0, this.state.player.hp - Math.max(0, enemy.attack - (this.state.player.defense + this.defenseBoost)) * dt * 0.8);
       }
     });
+    const before = this.state.enemies.length;
     this.state.enemies = this.state.enemies.filter((enemy) => enemy.hp > 0);
+    if (this.state.enemies.length !== before) {
+      const defeated = before - this.state.enemies.length;
+      this.state.player.xp += defeated * 8;
+      this.state.inventory.loot += defeated;
+      this.state.messages.unshift(`${defeated} monster${defeated > 1 ? 's' : ''} defeated.`);
+    }
     if (this.state.enemies.length === 0 && this.state.scene === 'overworld') {
       this.state.enemies.push(...this.spawnCaveWave());
       this.state.messages.unshift('A new wave emerges from the shadows.');
@@ -257,11 +283,13 @@ export class FantasyEmpireEngine {
   private tickPlayer(dt: number) {
     const regen = this.state.scene === 'cave' ? 0.15 : 0.08;
     this.state.player.mp = clamp(this.state.player.mp + regen * dt, 0, this.state.player.maxMp);
+    this.defenseBoost = Math.max(0, this.defenseBoost - dt * 0.9);
     if (this.state.player.hp < this.state.player.maxHp && this.state.inventory.food > 0 && this.state.gameTime % 6 < 0.2) {
       this.state.player.hp = clamp(this.state.player.hp + 0.1, 0, this.state.player.maxHp);
       this.state.inventory.food -= 0.02;
     }
-    if (this.state.player.xp >= this.xpToNextLevel()) this.levelUp();
+    while (this.state.player.xp >= this.xpToNextLevel()) this.levelUp();
+    this.collectNearbyChests();
     if (this.state.player.hp <= 0) {
       this.state.player.hp = this.state.player.maxHp;
       this.state.player.mp = this.state.player.maxMp;
@@ -437,6 +465,36 @@ export class FantasyEmpireEngine {
     if (!this.hovered) return;
     ctx.strokeStyle = state.selectedBuilding ? '#75d3ff' : 'rgba(255,255,255,0.14)';
     ctx.strokeRect(this.hovered.col * state.tileSize + 1, this.hovered.row * state.tileSize + 1, state.tileSize - 2, state.tileSize - 2);
+  }
+
+  private resolveAction(action: QueueAction) {
+    const target = this.state.enemies[0];
+    if (action.type === 'attack' && target) {
+      target.hp -= action.power + this.state.player.attack;
+      if (target.hp <= 0) this.state.player.xp += 10;
+      this.state.messages.unshift(`Attack dealt ${Math.round(action.power + this.state.player.attack)} damage.`);
+    } else if (action.type === 'spell') {
+      const spell = SPELLS.find((entry) => entry.id === action.spellId);
+      if (spell && target) {
+        target.hp -= spell.power + this.state.player.magic;
+        if (target.hp <= 0) this.state.player.xp += 12;
+        this.state.messages.unshift(`${spell.name} hits for ${spell.power + this.state.player.magic}.`);
+      }
+    } else if (action.type === 'defend') {
+      this.defenseBoost = Math.max(this.defenseBoost, 4);
+      this.state.messages.unshift('Defense raised.');
+    }
+  }
+
+  private collectNearbyChests() {
+    const pos = this.playerPos();
+    this.state.chests = this.state.chests.filter((chest) => {
+      if (distance(chest, pos) > 72) return true;
+      this.state.inventory.loot += 1;
+      this.state.inventory.potions += 1;
+      this.state.messages.unshift('A hidden chest was opened.');
+      return false;
+    });
   }
 
   private drawHUD() {
