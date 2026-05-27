@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BUILDINGS, SPELLS } from '@/lib/game/data';
 import { FantasyEmpireEngine } from '@/lib/game/engine';
-import type { GameState, SceneId, VillagerTask, BuildingType } from '@/lib/game/types';
+import type { GameState, SceneId, VillagerTask, BuildingType, SpellId } from '@/lib/game/types';
 
 export default function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -21,7 +21,7 @@ export default function GameCanvas() {
   const selectBuilding = (type: BuildingType | null) => engineRef.current?.setBuilding(type);
   const selectTask = (task: VillagerTask) => engineRef.current?.setTask(task);
   const queue = (type: 'attack' | 'defend' | 'spell') => engineRef.current?.queueAction(type);
-  const castSpell = (spellId: string) => engineRef.current?.castSpell(spellId);
+  const castSpell = (spellId: SpellId) => engineRef.current?.castSpell(spellId);
   const setScene = (scene: SceneId) => engineRef.current?.setScene(scene);
 
   return (
@@ -78,7 +78,7 @@ export default function GameCanvas() {
           <h3>Spellbook</h3>
           <div className="controls">
             {spells.map((spell) => (
-              <button key={spell?.id} className="btn" onClick={() => castSpell(spell?.id ?? '')}>{spell?.name}</button>
+              <button key={spell?.id} className="btn" onClick={() => spell && castSpell(spell.id)}>{spell?.name}</button>
             ))}
           </div>
           <p className="small">Spells unlock with D&amp;D-style leveling and consume mana.</p>
