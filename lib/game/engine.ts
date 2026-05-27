@@ -1,5 +1,5 @@
 import { BUILDINGS, MONSTERS, SPELLS } from './data';
-import type { BuildingType, GameState, GridPoint, QueueAction, SceneId, VillagerTask } from './types';
+import type { BuildingType, GameState, GridPoint, QueueAction, SceneId, SpellId, VillagerTask } from './types';
 
 const TILE = 32;
 const COLS = 28;
@@ -122,7 +122,7 @@ export class FantasyEmpireEngine {
     this.state.messages.unshift(`Villagers assigned to ${task}.`);
   }
 
-  queueAction(type: QueueAction['type'], spellId?: string) {
+  queueAction(type: QueueAction['type'], spellId?: SpellId) {
     const action: QueueAction = {
       id: uid('action'),
       type,
@@ -136,7 +136,7 @@ export class FantasyEmpireEngine {
     this.state.messages.unshift(`Queued ${action.name.toLowerCase()}.`);
   }
 
-  castSpell(spellId: string) {
+  castSpell(spellId: SpellId) {
     const spell = SPELLS.find((item) => item.id === spellId);
     if (!spell || !this.state.player.spellbook.includes(spell.id)) return;
     if (this.state.player.mp < spell.costMp) {
