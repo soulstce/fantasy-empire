@@ -69,6 +69,7 @@ export default function GameCanvas() {
             <button className="btn" onClick={() => queue('attack')}>Attack</button>
             <button className="btn" onClick={() => queue('defend')}>Defend</button>
             <button className="btn" onClick={() => queue('spell')}>Queue Spell</button>
+            <button className="btn" onClick={() => engineRef.current?.consumePotion()}>Use Potion</button>
           </div>
           <p className="small">Combat is real-time; actions fire based on equipment and queued decisions rather than turns.</p>
         </div>
