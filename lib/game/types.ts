@@ -53,6 +53,7 @@ export type QueueAction = {
   power: number;
   duration: number;
   remaining: number;
+  spellId?: SpellId;
 };
 
 export type Spell = {
