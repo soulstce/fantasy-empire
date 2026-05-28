@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import './globals.css';
+import '../globals.css';
 import { AppProviders } from '@/components/providers';
 
 export const metadata = {

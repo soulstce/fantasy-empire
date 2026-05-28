@@ -42,7 +42,8 @@ function initialState(): GameState {
   ];
 
   const mainHall = { id: uid('building'), type: 'main-hall' as const, row: 8, col: 10, hp: 600, maxHp: 600 };
-  const villagers = Array.from({ length: 4 }, (_, i) => ({ id: uid('villager'), task: 'idle' as const, x: 340 + i * 10, y: 284 + i * 6 }));
+  const spawn = gridToWorld({ row: 8, col: 12 });
+  const villagers = Array.from({ length: 4 }, (_, i) => ({ id: uid('villager'), task: 'idle' as const, x: spawn.x + i * 10, y: spawn.y + i * 6 }));
   const enemies = [
     { id: uid('enemy'), type: 'slime' as const, x: 790, y: 320, hp: 12, maxHp: 12, attack: 2, speed: 0.35, aggro: 0 },
     { id: uid('enemy'), type: 'goblin' as const, x: 900, y: 450, hp: 24, maxHp: 24, attack: 5, speed: 0.55, aggro: 0 },
@@ -62,7 +63,23 @@ function initialState(): GameState {
     villagers,
     enemies,
     chests: [{ x: 20 * TILE + 16, y: 6 * TILE + 16 }],
-    player: { level: 1, xp: 0, hp: 30, maxHp: 30, mp: 10, maxMp: 10, attack: 6, defense: 3, magic: 4, spellbook: ['ember'] },
+    player: {
+      level: 1,
+      xp: 0,
+      hp: 30,
+      maxHp: 30,
+      mp: 10,
+      maxMp: 10,
+      attack: 6,
+      defense: 3,
+      magic: 4,
+      spellbook: ['ember'],
+      x: spawn.x,
+      y: spawn.y,
+      targetX: spawn.x,
+      targetY: spawn.y,
+      speed: 88
+    },
     inventory: { wood: 80, food: 40, stone: 30, potions: 3, loot: 0 },
     selectedBuilding: null,
     selectedTask: 'gather',
@@ -98,8 +115,9 @@ export class FantasyEmpireEngine {
     this.onUpdate = onUpdate;
     canvas.width = this.state.width;
     canvas.height = this.state.height;
+    canvas.style.touchAction = 'none';
     this.bindInput();
-    this.revealAroundPlayer();
+    this.revealAroundPlayer(4);
     this.raf = requestAnimationFrame(this.loopFrame);
     this.onUpdate(this.state);
   }
@@ -110,7 +128,7 @@ export class FantasyEmpireEngine {
 
   setScene(scene: SceneId) {
     this.state.scene = scene;
-    this.state.messages.unshift(scene === 'cave' ? 'You descend into the cave.' : 'You return to the overworld.');
+    this.state.messages.unshift(scene === 'cave' ? 'You descend into the cave.' : 'You return to the overworld.' );
   }
 
   setBuilding(type: BuildingType | null) {
@@ -120,6 +138,11 @@ export class FantasyEmpireEngine {
   setTask(task: VillagerTask) {
     this.state.selectedTask = task;
     this.state.messages.unshift(`Villagers assigned to ${task}.`);
+  }
+
+  movePlayerTo(point: { x: number; y: number }) {
+    this.state.player.targetX = clamp(point.x, 16, this.state.width - 16);
+    this.state.player.targetY = clamp(point.y, 16, this.state.height - 16);
   }
 
   queueAction(type: QueueAction['type'], spellId?: SpellId) {
@@ -180,23 +203,27 @@ export class FantasyEmpireEngine {
 
   private spawnVillagers(count: number) {
     for (let i = 0; i < count; i += 1) {
-      this.state.villagers.push({ id: uid('villager'), task: 'idle', x: 330 + i * 12, y: 310 + i * 6 });
+      this.state.villagers.push({ id: uid('villager'), task: 'idle', x: this.state.player.x + 12 + i * 12, y: this.state.player.y + 18 + i * 6 });
     }
   }
 
   private bindInput() {
-    this.canvas.addEventListener('click', (event) => {
+    const handlePointer = (event: PointerEvent) => {
       const rect = this.canvas.getBoundingClientRect();
       const x = ((event.clientX - rect.left) / rect.width) * this.state.width;
       const y = ((event.clientY - rect.top) / rect.height) * this.state.height;
       const col = Math.floor(x / this.state.tileSize);
       const row = Math.floor(y / this.state.tileSize);
-      this.buildSelected({ row, col });
-      this.revealAround({ x, y }, 4);
-      this.onUpdate(this.state);
-    });
+      this.hovered = { row, col };
+      if (this.state.selectedBuilding) {
+        this.buildSelected({ row, col });
+      } else {
+        this.movePlayerTo({ x, y });
+      }
+    };
 
-    this.canvas.addEventListener('mousemove', (event) => {
+    this.canvas.addEventListener('pointerdown', handlePointer);
+    this.canvas.addEventListener('pointermove', (event) => {
       const rect = this.canvas.getBoundingClientRect();
       const x = ((event.clientX - rect.left) / rect.width) * this.state.width;
       const y = ((event.clientY - rect.top) / rect.height) * this.state.height;
@@ -206,11 +233,10 @@ export class FantasyEmpireEngine {
 
   private update(dt: number) {
     this.state.gameTime += dt;
-    this.revealAroundPlayer();
+    this.tickPlayer(dt);
     this.tickQueue(dt);
     this.tickVillagers(dt);
     this.tickEnemies(dt);
-    this.tickPlayer(dt);
     if (this.state.scene === 'cave') this.state.enemies.forEach((enemy) => { if (enemy.hp <= 0) return; enemy.aggro = clamp(enemy.aggro + dt, 0, 999); });
   }
 
@@ -281,8 +307,17 @@ export class FantasyEmpireEngine {
   }
 
   private tickPlayer(dt: number) {
-    const regen = this.state.scene === 'cave' ? 0.15 : 0.08;
-    this.state.player.mp = clamp(this.state.player.mp + regen * dt, 0, this.state.player.maxMp);
+    const player = this.state.player;
+    const dx = player.targetX - player.x;
+    const dy = player.targetY - player.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 1) {
+      const step = Math.min(dist, player.speed * dt);
+      player.x += (dx / dist) * step;
+      player.y += (dy / dist) * step;
+      this.revealAroundPlayer(4);
+    }
+    this.state.player.mp = clamp(this.state.player.mp + (this.state.scene === 'cave' ? 0.15 : 0.08) * dt, 0, this.state.player.maxMp);
     this.defenseBoost = Math.max(0, this.defenseBoost - dt * 0.9);
     if (this.state.player.hp < this.state.player.maxHp && this.state.inventory.food > 0 && this.state.gameTime % 6 < 0.2) {
       this.state.player.hp = clamp(this.state.player.hp + 0.1, 0, this.state.player.maxHp);
@@ -291,8 +326,13 @@ export class FantasyEmpireEngine {
     while (this.state.player.xp >= this.xpToNextLevel()) this.levelUp();
     this.collectNearbyChests();
     if (this.state.player.hp <= 0) {
+      const spawn = this.playerSpawn();
       this.state.player.hp = this.state.player.maxHp;
       this.state.player.mp = this.state.player.maxMp;
+      this.state.player.x = spawn.x;
+      this.state.player.y = spawn.y;
+      this.state.player.targetX = spawn.x;
+      this.state.player.targetY = spawn.y;
       this.state.messages.unshift('The hero has fallen, then rallies again at the main hall.');
     }
   }
@@ -316,13 +356,17 @@ export class FantasyEmpireEngine {
     return this.state.player.level * 20;
   }
 
-  private playerPos() {
+  private playerSpawn() {
     const hall = this.state.buildings.find((b) => b.type === 'main-hall');
     return hall ? gridToWorld({ row: hall.row, col: hall.col }) : { x: 320, y: 280 };
   }
 
-  private revealAroundPlayer() {
-    this.revealAround(this.playerPos(), 5);
+  private playerPos() {
+    return { x: this.state.player.x, y: this.state.player.y };
+  }
+
+  private revealAroundPlayer(radius = 5) {
+    this.revealAround(this.playerPos(), radius);
   }
 
   private revealAround(point: { x: number; y: number }, radius: number) {
@@ -356,6 +400,8 @@ export class FantasyEmpireEngine {
     this.drawEnemies();
     this.drawChests();
     this.drawFog();
+    this.drawTargetMarker();
+    this.drawPlayer();
     this.drawSelection();
     this.drawHUD();
   }
@@ -460,6 +506,43 @@ export class FantasyEmpireEngine {
     }
   }
 
+  private drawTargetMarker() {
+    const { ctx, state } = this;
+    const target = { x: state.player.targetX, y: state.player.targetY };
+    if (distance(target, this.playerPos()) < 2) return;
+    ctx.strokeStyle = 'rgba(117, 211, 255, 0.55)';
+    ctx.beginPath();
+    ctx.arc(target.x, target.y, 8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(target.x, target.y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(117, 211, 255, 0.8)';
+    ctx.fill();
+  }
+
+  private drawPlayer() {
+    const { ctx } = this;
+    const { x, y } = this.playerPos();
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.shadowColor = 'rgba(0,0,0,0.4)';
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = '#d9f3ff';
+    ctx.beginPath();
+    ctx.arc(0, 0, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#4fa8ff';
+    ctx.beginPath();
+    ctx.arc(0, 0, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(2, -2, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   private drawSelection() {
     const { ctx, state } = this;
     if (!this.hovered) return;
@@ -500,8 +583,8 @@ export class FantasyEmpireEngine {
   private drawHUD() {
     const { ctx, state } = this;
     const summary = `L${state.player.level} HP ${Math.ceil(state.player.hp)}/${state.player.maxHp} MP ${Math.ceil(state.player.mp)}/${state.player.maxMp}`;
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fillRect(10, 10, 360, 108);
+    ctx.fillStyle = 'rgba(0,0,0,0.42)';
+    ctx.fillRect(10, 10, 392, 108);
     ctx.fillStyle = '#edf3ff';
     ctx.font = 'bold 18px sans-serif';
     ctx.fillText('Fantasy Empire', 20, 34);

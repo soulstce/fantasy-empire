@@ -76,6 +76,11 @@ export type Player = {
   defense: number;
   magic: number;
   spellbook: SpellId[];
+  x: number;
+  y: number;
+  targetX: number;
+  targetY: number;
+  speed: number;
 };
 
 export type GameState = {
